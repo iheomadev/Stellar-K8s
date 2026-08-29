@@ -227,3 +227,5 @@ pub mod observability_dashboard;
 pub mod observability_pipeline;
 pub mod pvc_autoscaler;
 pub mod resource_optimization;
+#[cfg(test)]
+mod controller_unit_tests;
