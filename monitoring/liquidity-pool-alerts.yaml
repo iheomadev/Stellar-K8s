@@ -1,0 +1,181 @@
+# Prometheus Alerting Rules — Stellar Liquidity Pool and Pathfinding Monitoring
+#
+# Issue: https://github.com/OtowoOrg/Stellar-K8s/issues/1576
+#
+# Apply with:
+#   kubectl apply -f liquidity-pool-alerts.yaml -n stellar-system
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: stellar-liquidity-pool-alerts
+  namespace: stellar-system
+  labels:
+    app.kubernetes.io/part-of: stellar-operator
+    prometheus: kube-prometheus
+    role: alert-rules
+    stellar.org/feature: liquidity-pool-monitoring
+    stellar.org/issue: "1576"
+spec:
+  groups:
+    # ─── Pool Imbalance Alerts ───────────────────────────────────────────────
+    - name: stellar_lp_imbalance
+      interval: 30s
+      rules:
+        - alert: StellarLiquidityPoolImbalanceWarning
+          expr: |
+            stellar_lp_imbalance_ratio > 10
+          for: 1m
+          labels:
+            severity: warning
+            team: stellar-ops
+          annotations:
+            summary: >
+              Stellar liquidity pool {{ $labels.pool_id }} reserve imbalance
+              exceeds 10%
+            description: >
+              Pool {{ $labels.pool_id }} ({{ $labels.asset_a }}/{{ $labels.asset_b }})
+              has a reserve imbalance of {{ $value | humanizePercentage }}.
+              A healthy constant-product AMM should be close to 50/50.
+              This may indicate heavy one-sided trading pressure or a pool drain
+              in progress.
+            runbook_url: "https://github.com/OtowoOrg/Stellar-K8s/blob/main/docs/troubleshooting/liquidity-pool-imbalance.md"
+
+        - alert: StellarLiquidityPoolImbalanceCritical
+          expr: |
+            stellar_lp_imbalance_ratio > 20
+          for: 2m
+          labels:
+            severity: critical
+            team: stellar-ops
+          annotations:
+            summary: >
+              CRITICAL: Stellar liquidity pool {{ $labels.pool_id }} reserve
+              imbalance exceeds 20%
+            description: >
+              Pool {{ $labels.pool_id }} ({{ $labels.asset_a }}/{{ $labels.asset_b }})
+              has reached a critical reserve imbalance of {{ $value | humanizePercentage }}.
+              Investigate for pool drain, arbitrage attack, or oracle manipulation.
+              Immediate review recommended.
+            runbook_url: "https://github.com/OtowoOrg/Stellar-K8s/blob/main/docs/troubleshooting/liquidity-pool-imbalance.md"
+
+        - alert: StellarLiquidityPoolLowReserve
+          expr: |
+            stellar_lp_reserve_a < 1000 or stellar_lp_reserve_b < 1000
+          for: 5m
+          labels:
+            severity: warning
+            team: stellar-ops
+          annotations:
+            summary: >
+              Stellar liquidity pool {{ $labels.pool_id }} reserve critically low
+            description: >
+              Pool {{ $labels.pool_id }} has a very low reserve balance
+              ({{ $value }} units). The pool may no longer be able to serve
+              path-payment requests efficiently.
+
+    # ─── Price Impact Alerts ─────────────────────────────────────────────────
+    - name: stellar_lp_price_impact
+      interval: 60s
+      rules:
+        - alert: StellarLiquidityPoolHighPriceImpact
+          expr: |
+            stellar_lp_price_impact_pct > 2
+          for: 5m
+          labels:
+            severity: warning
+            team: stellar-ops
+          annotations:
+            summary: >
+              High price impact in Stellar pool {{ $labels.pool_id }}
+            description: >
+              A 1% pool-size trade on pool {{ $labels.pool_id }}
+              ({{ $labels.asset_a }}/{{ $labels.asset_b }}) results in
+              {{ $value | humanizePercentage }} price impact. This typically
+              indicates low pool liquidity depth.
+
+        - alert: StellarLiquidityPoolVeryHighPriceImpact
+          expr: |
+            stellar_lp_price_impact_pct > 5
+          for: 5m
+          labels:
+            severity: critical
+            team: stellar-ops
+          annotations:
+            summary: >
+              CRITICAL: Very high price impact in Stellar pool {{ $labels.pool_id }}
+            description: >
+              A 1% pool-size trade on pool {{ $labels.pool_id }}
+              ({{ $labels.asset_a }}/{{ $labels.asset_b }}) results in
+              {{ $value | humanizePercentage }} price impact. The pool is
+              critically thin — path-payment routing will likely fail or
+              produce unacceptable slippage.
+
+    # ─── Path Payment Failure Alerts ─────────────────────────────────────────
+    - name: stellar_path_payment_failures
+      interval: 60s
+      rules:
+        - alert: StellarPathPaymentFailureRateHigh
+          expr: |
+            stellar_path_payment_failure_rate > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: stellar-ops
+          annotations:
+            summary: >
+              Stellar path payment failure rate elevated on node {{ $labels.node }}
+            description: >
+              The path payment failure rate on node {{ $labels.node }} is
+              {{ $value | humanizePercentage }} (threshold: 5%).
+              Check pool liquidity, network congestion, and AMM routing quality.
+            runbook_url: "https://github.com/OtowoOrg/Stellar-K8s/blob/main/docs/troubleshooting/path-payment-failures.md"
+
+        - alert: StellarPathPaymentFailureRateCritical
+          expr: |
+            stellar_path_payment_failure_rate > 0.20
+          for: 2m
+          labels:
+            severity: critical
+            team: stellar-ops
+          annotations:
+            summary: >
+              CRITICAL: Stellar path payment failure rate on {{ $labels.node }}
+              exceeds 20%
+            description: >
+              The path payment failure rate on node {{ $labels.node }} has
+              reached {{ $value | humanizePercentage }}. This level of failure
+              indicates a systemic routing or liquidity issue. Investigate
+              immediately.
+
+        - alert: StellarPathPaymentMonitorStale
+          expr: |
+            (time() - stellar_lp_last_polled_timestamp) > 60
+          for: 2m
+          labels:
+            severity: warning
+            team: stellar-ops
+          annotations:
+            summary: "Stellar liquidity pool monitor has not polled recently"
+            description: >
+              The liquidity pool monitor has not updated its metrics in the
+              last 60 seconds. The operator may be unable to reach Horizon.
+
+    # ─── Pool Share Supply Alerts ────────────────────────────────────────────
+    - name: stellar_lp_shares
+      interval: 5m
+      rules:
+        - alert: StellarLiquidityPoolSharesDraining
+          expr: |
+            delta(stellar_lp_total_shares[10m]) < -0.1 * stellar_lp_total_shares
+          for: 5m
+          labels:
+            severity: warning
+            team: stellar-ops
+          annotations:
+            summary: >
+              Stellar pool {{ $labels.pool_id }} is losing LP shares rapidly
+            description: >
+              Pool {{ $labels.pool_id }} ({{ $labels.asset_a }}/{{ $labels.asset_b }})
+              has lost more than 10% of its LP shares in the past 10 minutes.
+              This may indicate a liquidity-provider exodus or a pool exploit.

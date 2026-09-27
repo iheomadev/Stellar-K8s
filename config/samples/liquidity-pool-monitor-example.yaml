@@ -1,0 +1,95 @@
+# Example: Liquidity Pool Monitor Configuration
+#
+# Issue: https://github.com/OtowoOrg/Stellar-K8s/issues/1576
+#
+# This ConfigMap configures the LiquidityPoolMonitor component of the
+# Stellar-K8s operator.  The operator reads this at startup and spawns
+# a background polling loop that:
+#
+#   1. Fetches all Horizon liquidity-pool entries every 5 s (one ledger).
+#   2. Computes per-pool reserve imbalance and price-impact metrics.
+#   3. Raises alerts when thresholds are breached.
+#   4. Exports Prometheus metrics: stellar_lp_*, stellar_path_payment_*.
+#
+# Apply with:
+#   kubectl apply -f liquidity-pool-monitor-example.yaml -n stellar
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stellar-lp-monitor-config
+  namespace: stellar
+  labels:
+    app.kubernetes.io/part-of: stellar-operator
+    stellar.org/feature: liquidity-pool-monitoring
+    stellar.org/issue: "1576"
+data:
+  config.yaml: |
+    # Horizon base URL (must be reachable from the operator pod).
+    horizonUrl: "http://horizon.stellar:8000"
+
+    # Poll interval in seconds. Set to 5 to detect imbalance within one ledger.
+    pollIntervalSecs: 5
+
+    # Pool imbalance threshold (percent).
+    # Alerts fire when abs(reserve_a_pct - 50) exceeds this value.
+    # Example: 10 means a 60/40 or worse split triggers a warning.
+    imbalanceThresholdPct: 10.0
+
+    # Path-payment failure rate threshold (0–1).
+    # Alerts fire when the rolling failure rate exceeds this value.
+    failureRateThreshold: 0.05
+
+    # Number of top pools to include in price-impact reporting.
+    topPoolCount: 20
+
+    # Kubernetes namespace and node name of the Horizon instance to monitor.
+    horizonNamespace: "stellar"
+    horizonNodeName: "horizon-mainnet"
+---
+# Example Grafana dashboard provisioning for the LP metrics.
+# Uncomment and customise for your Grafana instance.
+#
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: stellar-lp-grafana-dashboard
+#   namespace: stellar-monitoring
+#   labels:
+#     grafana_dashboard: "1"
+# data:
+#   stellar-lp-dashboard.json: |
+#     {
+#       "title": "Stellar Liquidity Pool Health",
+#       "panels": [
+#         {
+#           "title": "Reserve Imbalance (%)",
+#           "type": "gauge",
+#           "targets": [{
+#             "expr": "stellar_lp_imbalance_ratio"
+#           }]
+#         },
+#         {
+#           "title": "Price Impact for 1% Trade",
+#           "type": "timeseries",
+#           "targets": [{
+#             "expr": "stellar_lp_price_impact_pct"
+#           }]
+#         },
+#         {
+#           "title": "Path Payment Failure Rate",
+#           "type": "timeseries",
+#           "targets": [{
+#             "expr": "stellar_path_payment_failure_rate"
+#           }]
+#         },
+#         {
+#           "title": "Reserve Balances",
+#           "type": "timeseries",
+#           "targets": [
+#             {"expr": "stellar_lp_reserve_a", "legendFormat": "{{asset_a}}"},
+#             {"expr": "stellar_lp_reserve_b", "legendFormat": "{{asset_b}}"}
+#           ]
+#         }
+#       ]
+#     }

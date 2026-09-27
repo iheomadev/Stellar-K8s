@@ -150,6 +150,9 @@ pub(crate) mod vsl;
 pub mod webhook_delivery;
 pub mod zk_archive_verifier;
 
+// Issue #1576 — Pathfinding and Liquidity Pool Monitoring
+pub mod liquidity_pool_monitor;
+
 pub use anomaly_detection::{run_anomaly_detection, AnomalyDetector, AnomalyEvent};
 pub use archive_health::{
     calculate_backoff, check_archive_integrity, check_history_archive_health, ArchiveHealthResult,
@@ -227,3 +230,10 @@ pub mod observability_dashboard;
 pub mod observability_pipeline;
 pub mod pvc_autoscaler;
 pub mod resource_optimization;
+
+// Issue #1576 — Liquidity Pool Monitor exports
+pub use liquidity_pool_monitor::{
+    compute_price_impact, render_prometheus_metrics, AssetId, LiquidityPoolAlert,
+    LiquidityPoolMetrics, LiquidityPoolMonitor, LiquidityPoolMonitorConfig,
+    LiquidityPoolSnapshot, PathPaymentStats,
+};
